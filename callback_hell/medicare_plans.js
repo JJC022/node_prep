@@ -33,18 +33,32 @@ module.exports.getPlans = function (req, res) {
 
 // MY CODE STARTS HERE 
 
-module.exports.cleanedPlans = function (planData){
-    return planData
+async function getPlansRefactored(req, res){
+    let connection; 
+    try{
+        const state = validateRequest(req);
+        const connection = await establishConnection();
+        const db_out = await queryDb(connection, state);
+        const results = await cleanResults(db_out);
+        sendResponse(results, res);
+    }catch (error){
+    console.error("Error: ", error);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    if (connection && connection.end) connection.end();
+    console.log("Request finished");
+  }
 }
+
+module.exports.getPlansRefactored = getPlansRefactored
 
 const mysql = require('mysql');
 
 const validateRequest = function (req, res){
-
     const state = req.query.state;
 
     if (!state) {
-      res.send('missing state');
+      throw new Error("state is required");
       return;
     } 
     if (!state in validStates){
@@ -60,45 +74,19 @@ const connectionConfig = {
     database: 'medicare'
     }
 async function establishConnection (connectionConfig){
-    [host, user, password, database] = connectionConfig //unpack configs
-    const connection = await mysql.createConnection({
-    host: host,
-    user: user,
-    password: password,
-    database: database
-    });
-    return connection
+    return mysql.createConnection(connectionConfig)
 }
 
-const testConnection = function(connection){
-    try{
-        connection.connect(function (err) {
-            if (err) {
-            console.log('Connection error', err);
-            }
-        })
-    }catch (err){
-        console.log("Error: " + err)
-    }finally{
-        return connection
-    }
-    }
-
 async function queryDb(connection, state) {
-    // Missing 'state' parameter in function definition
-    
     return new Promise((resolve, reject) => {
-        connection.query('SELECT * FROM partdplans WHERE state="' + state + '"', function(error, results, fields) {
+      connection.query('SELECT * FROM partdplans WHERE state = ?', [state], function (error, results) {
         if (error) {
-            console.log(error);
-            reject(error);
+          return reject(error);
         }
-        if (results) {
-            resolve(results);
-        }
-        });
+        resolve(results);
+      });
     });
-    }
+  }
 
 const cleanResults = function(results){
     if (results.length > 0) {
@@ -113,12 +101,10 @@ const cleanResults = function(results){
     }
 }
 
-const sendResponse = function(cleaned){
-    if(cleaned.length > 0 ){
-        res.json({
-            plans: cleaned
-        })
+function sendResponse(cleaned, res) {
+    if (cleaned.length > 0) {
+      res.json({ plans: cleaned });
     } else {
-      res.send('no plans found');
+      res.status(404).json({ error: "No plans found for the given state" });
     }
-}
+  }
